@@ -47,7 +47,7 @@ npm run dev        # حالت توسعه: با هر ذخیره، باندل خو
 
 ## ☁️ استقرار روی Vercel
 
-روی Vercel سرور Node همیشه‌روشن نداریم؛ درخواست‌های `/api/*` توسط تابع سرورلس `api/[...path].js` به همان کد `server/` سپرده می‌شوند. چون Vercel دیسک دائمی ندارد، **پایگاه‌داده در Redis (Upstash)** نگهداری می‌شود (بدون پکیج اضافه، از طریق REST API).
+روی Vercel سرور Node همیشه‌روشن نداریم؛ درخواست‌های `/api/*` توسط تابع سرورلس `api/index.js` (با rewrite در `vercel.json`) به همان کد `server/` سپرده می‌شوند. چون Vercel دیسک دائمی ندارد، **پایگاه‌داده در Redis (Upstash)** نگهداری می‌شود (بدون پکیج اضافه، از طریق REST API).
 
 1. پروژه را روی Vercel دیپلوی کنید (تنظیمات در `vercel.json` آماده است).
 2. در داشبورد پروژه: **Storage ← Create Database ← Upstash (Redis)** ← پلن رایگان ← **Connect** به همین پروژه.
@@ -133,7 +133,7 @@ Final Project/
 │   ├── components/          ← UI پایه، مودال/توست، نمودارهای SVG، ویجت رزرو، رسید
 │   ├── layouts/             ← قالب عمومی و قالب پنل (منوی کناری)
 │   └── pages/               ← public / patient / doctor / admin
-├── api/[...path].js         ← تابع سرورلس Vercel (همه‌ی /api/*)
+├── api/index.js             ← تابع سرورلس Vercel (همه‌ی /api/* با rewrite)
 ├── vercel.json              ← تنظیمات استقرار Vercel
 ├── build.mjs                ← ساخت باندل با esbuild
 ├── public/
