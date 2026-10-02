@@ -1,5 +1,6 @@
 // داشبورد مدیریتی با نمودارها و شاخص‌های کلیدی
 import { get, post, auth } from '../../lib/api.js';
+import { useApp } from '../../lib/app.jsx';
 import * as J from '../../lib/jalali.js';
 import { fa, num, pct, STATUS } from '../../lib/format.js';
 import { useAsync } from '../../lib/hooks.js';
@@ -22,6 +23,7 @@ const PALETTE = ['#2563eb', '#0fb5a6', '#7c3aed', '#f59e0b', '#ef4444', '#14b8a6
 const Card = ({ icon, title, extra, children }) => <div className="card"><div className="card-h"><h3><Icon name={icon} /> {title}</h3>{extra}</div><div className="card-b">{children}</div></div>;
 
 export default function AdminDashboard() {
+  const { meta } = useApp();
   const res = useAsync(() => get('/admin/stats'), []);
   if (res.error) return <ErrorBox error={res.error} retry={res.reload} />;
   const s = res.data;
@@ -31,8 +33,9 @@ export default function AdminDashboard() {
   const hrs = s.hours.map((v, h) => ({ h, v })).filter(x => x.h >= 7 && x.h <= 21);
   const reminders = async () => { const r = await post('/admin/run-reminders'); toast(`${fa(r.sent)} پیامک یادآوری جدید ارسال شد.`, 'success'); };
   return <>
-    <div className="page-head"><div><h1>داشبورد مدیریتی</h1><p>نمای کلی عملکرد سامانه — {J.withDay(J.ymd(), true)}</p></div>
+    <div className="page-head"><div><h1>داشبورد مدیریتی</h1><p>نمای کلی عملکرد سامانه — {J.withDay(J.ymd(), true)} • پایگاه‌داده: {{ redis: 'Redis (Upstash)', file: 'فایل JSON', temporary: 'موقت' }[meta.storage] || '—'}</p></div>
       <div className="row"><AsyncButton className="btn ghost" onClick={reminders}><Icon name="bell" size="sm" /> اجرای یادآوری‌ها</AsyncButton><AsyncButton className="btn" onClick={exportCsv}><Icon name="download" size="sm" /> خروجی اکسل نوبت‌ها</AsyncButton></div></div>
+    {meta.storage === 'temporary' && <div className="alert warn mb3"><Icon name="database" /><div><b>پایگاه‌داده‌ی دائمی وصل نیست</b><p>سامانه روی سرور ابری (Vercel) اجرا شده ولی Redis تنظیم نشده؛ داده‌ها موقت هستند و ممکن است پاک شوند. از تب Storage در Vercel یک پایگاه Upstash Redis بسازید و به پروژه وصل کنید، سپس دوباره Deploy کنید.</p></div></div>}
     <div className="kpis">
       <Kpi icon="calendar" color="blue" value={num(c.today)} label="نوبت امروز" sub={`${num(c.upcoming)} نوبت آینده`} />
       <Kpi icon="users" color="purple" value={num(c.patients)} label="بیمار ثبت‌نامی" sub={`${num(c.users)} کاربر کل`} />

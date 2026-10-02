@@ -12,11 +12,23 @@ const PORT = +process.env.PORT || 3000;
 const PUBLIC = path.join(__dirname, '..', 'public');
 
 /* ======================= راه‌اندازی ======================= */
-if (db.load() || process.argv.includes('--reset')) {
-  const r = seed();
-  console.log(`✅ داده‌ی نمایشی ساخته شد: ${r.users} کاربر، ${r.doctors} پزشک، ${r.appointments} نوبت`);
+function seedIfNeeded(needSeed) {
+  if (needSeed || process.argv.includes('--reset')) {
+    const r = seed();
+    console.log(`✅ داده‌ی نمایشی ساخته شد: ${r.users} کاربر، ${r.doctors} پزشک، ${r.appointments} نوبت`);
+  }
+  db.data.settings = { ...DEFAULT_SETTINGS, ...db.data.settings };
 }
-db.data.settings = { ...DEFAULT_SETTINGS, ...db.data.settings };
+// در حالت ابری (Redis) بارگذاری async است؛ همه‌ی درخواست‌ها منتظر ready می‌مانند
+const ready = db.REMOTE
+  ? db.loadRemote().then(async need => {
+    seedIfNeeded(need);
+    if (need) await db.commitInitial();
+    db.data.settings = { ...DEFAULT_SETTINGS, ...db.data.settings };
+    S.tick();
+    await db.commit();
+  })
+  : Promise.resolve(seedIfNeeded(db.load()));
 
 /* ======================= روتر ساده ======================= */
 const routes = [];
@@ -60,7 +72,7 @@ function authUser(req) {
   return u;
 }
 
-const server = http.createServer(async (req, res) => {
+async function handle(req, res) {
   const url = new URL(req.url, 'http://x');
   const p = decodeURIComponent(url.pathname);
   if (!p.startsWith('/api/')) return serveStatic(p, res);
@@ -86,7 +98,32 @@ const server = http.createServer(async (req, res) => {
     console.error(e);
     send(res, 500, { error: 'خطای داخلی سرور.' });
   }
-});
+}
+
+/**
+ * نسخه‌ی ابری هندلر (Vercel / Redis):
+ * ۱) همگام‌سازی با Redis ۲) اجرای درخواست ۳) ذخیره‌ی تغییرات «قبل از» ارسال پاسخ
+ * (در سرورلس، پس از ارسال پاسخ ممکن است تابع متوقف شود؛ پس ذخیره باید پیش از آن تمام شود)
+ */
+let lastTick = 0;
+async function handleCloud(req, res) {
+  const end = res.end.bind(res);
+  let pending = null;
+  try {
+    await ready;
+    await db.sync();
+    if (Date.now() - lastTick > 30000) { lastTick = Date.now(); try { S.tick(); } catch (e) { console.error(e); } } // زمان‌بند یادآوری
+    res.end = (...args) => { pending = args; return res; };
+    await handle(req, res);
+    await db.commit();
+  } catch (e) {
+    console.error(e);
+    if (!res.headersSent && !pending) { res.end = end; return send(res, 500, { error: 'خطا در ارتباط با پایگاه‌داده.' }); }
+  }
+  res.end = end;
+  if (pending) end(...pending);
+}
+const handler = db.REMOTE || db.SERVERLESS ? handleCloud : handle;
 
 function serveStatic(p, res) {
   let file = path.normalize(path.join(PUBLIC, p));
@@ -157,6 +194,7 @@ route('GET', '/api/meta', null, () => {
   const sum = r.reduce((a, m) => a + m.sum, 0), n = r.reduce((a, m) => a + m.n, 0);
   const doneCount = db.data.appointments.filter(a => a.status === 'done').length;
   return {
+    storage: db.REMOTE ? 'redis' : db.SERVERLESS ? 'temporary' : 'file',
     settings: { siteName: st.siteName, bookingWindowDays: st.bookingWindowDays, cancelDeadlineHours: st.cancelDeadlineHours, supportPhone: st.supportPhone, maintenance: st.maintenance, reminderHours: st.reminderHours, waitlistAutoBook: st.waitlistAutoBook },
     specialties: db.data.specialties.filter(s => s.active !== false).map(s => ({ ...s, count: db.data.doctors.filter(d => d.specialtyId === s.id && d.active !== false).length })),
     centers: db.data.centers.filter(c => c.active !== false).map(c => ({ ...c, doctorCount: db.data.doctors.filter(d => d.centerIds.includes(c.id) && d.active !== false).length })),
@@ -867,20 +905,27 @@ route('POST', '/api/admin/reset-demo', A, () => {
 route('POST', '/api/admin/run-reminders', A, () => { const before = db.data.sms.length; S.tick(); return { sent: db.data.sms.length - before }; });
 
 /* ======================= اجرا ======================= */
-setInterval(() => { try { S.tick(); } catch (e) { console.error(e); } }, 30000);
-S.tick();
+module.exports = handler; // برای Vercel (api/[...path].js)
 
-function shutdown() { try { db.flush(); } catch { } process.exit(0); }
-process.on('SIGINT', shutdown); process.on('SIGTERM', shutdown);
+if (require.main === module) {
+  const server = http.createServer(handler);
+  ready.then(() => {
+    if (!db.REMOTE) S.tick();
+    setInterval(async () => { try { await db.sync(); S.tick(); await db.commit(); } catch (e) { console.error(e); } }, 30000);
+  });
+  function shutdown() { Promise.resolve(db.commit()).catch(() => { }).finally(() => { try { if (!db.REMOTE) db.flush(); } catch { } process.exit(0); }); }
+  process.on('SIGINT', shutdown); process.on('SIGTERM', shutdown);
 
-server.listen(PORT, () => {
-  console.log(`\n🩺 سامانه‌ی نوبت‌دهی «${db.data.settings.siteName}» اجرا شد`);
-  console.log(`🌐 آدرس:  http://localhost:${PORT}\n`);
-  console.log('حساب‌های نمایشی (رمز همه: 123456):');
-  console.log('  مدیر:  09120000001   پزشک: 09120000002   بیمار: 09120000003\n');
-});
-server.on('error', e => {
-  if (e.code === 'EADDRINUSE') console.error(`❌ پورت ${PORT} اشغال است. با PORT=3001 npm start اجرا کنید.`);
-  else console.error(e);
-  process.exit(1);
-});
+  ready.then(() => server.listen(PORT, () => {
+    console.log(`\n🩺 سامانه‌ی نوبت‌دهی «${db.data.settings.siteName}» اجرا شد`);
+    console.log(`🌐 آدرس:  http://localhost:${PORT}\n`);
+    console.log('حساب‌های نمایشی (رمز همه: 123456):');
+    console.log('  مدیر:  09120000001   پزشک: 09120000002   بیمار: 09120000003\n');
+    console.log(db.REMOTE ? '🗄  پایگاه‌داده: Redis (Upstash)' : `🗄  پایگاه‌داده: ${db.DB_FILE}`);
+  })).catch(e => { console.error('❌ اتصال به پایگاه‌داده ناموفق بود:', e.message); process.exit(1); });
+  server.on('error', e => {
+    if (e.code === 'EADDRINUSE') console.error(`❌ پورت ${PORT} اشغال است. با PORT=3001 npm start اجرا کنید.`);
+    else console.error(e);
+    process.exit(1);
+  });
+}
