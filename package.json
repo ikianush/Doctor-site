@@ -1,0 +1,21 @@
+{
+  "name": "noban-appointment-system",
+  "version": "2.0.0",
+  "description": "سامانه‌ی تحت وب مدیریت نوبت‌دهی مراکز درمانی (نوبان) — React + Node.js",
+  "main": "server/server.js",
+  "scripts": {
+    "start": "node server/server.js",
+    "build": "node build.mjs",
+    "dev": "node build.mjs --watch",
+    "reset": "node server/server.js --reset",
+    "test": "node tests/run.js"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "esbuild": "^0.27.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  },
+  "engines": { "node": ">=18" },
+  "license": "MIT"
+}
